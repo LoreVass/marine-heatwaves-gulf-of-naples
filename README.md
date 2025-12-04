@@ -1,125 +1,182 @@
-# Marine Heatwaves in the Gulf of Naples (2014–2024)
+# 🌊 Marine Heatwaves Detection in the Gulf of Naples  
+### NOAA OISST v2.1 Daily SST (1984–2024)
 
-This project analyzes **marine heatwaves (MHWs)** in the Gulf of Naples using 
-daily sea surface temperature (SST) data from **NOAA OISST v2.1**.  
-A Python script processes multiple years of SST data, computes a regional 
-climatology, detects heatwave events following the Hobday et al. (2016) 
-definition, and generates:
+This repository contains a complete Python workflow for:
 
-- A **detailed event catalogue** (per-event start/end, duration, intensity)
-- A **yearly summary** (number of events, total MHW days, max intensity)
-- A **time-series plot** with climatology, threshold, and shaded MHW periods
-- A **Jupyter Notebook** for visualization and interpretation
+- 📥 Downloading **daily NOAA OI SST v2.1** data (1984–2024) automatically  
+- 🗺 Subsetting SST to a **region of interest** (Gulf of Naples)  
+- 📈 Computing **climatology and heatwave thresholds** based on a user-defined baseline  
+- 🔥 Detecting **marine heatwaves (MHW)** using the Hobday et al. (2016) definition  
+- 📊 Exporting results, figures, and processed datasets for downstream analysis  
 
-The repository demonstrates geospatial data handling, climatology calculation, 
-and event detection for environmental and marine science applications.
+This project is intended for environmental data science, marine ecology, and long-term SST monitoring.
 
 ---
 
-## 🔍 Study Area
+## 📁 Repository Structure
 
-**Region:** Gulf of Naples, Tyrrhenian Sea (Central Mediterranean)
+```
+marine-heatwaves-gulf-of-naples/
+│
+├── data/                     # Empty folder (raw SST will go here manually)
+│
+├── notebooks/                # Jupyter notebooks for exploration & visualization
+│
+├── plots/                    # Auto-generated figures (MHW plots, SST trends, etc.)
+│
+├── scripts/                  # Python scripts (main analysis workflow)
+│
+├── tables/                   # Output CSV event tables (auto-generated)
+│
+├── .gitignore                # Ignore rules for notebooks, data, cache, etc.
+├── README.md                 # Project documentation
+└── requirements.txt          # Python dependencies
+```
 
-Bounding box:
-- **Latitude:** 40.3°N → 41.1°N  
-- **Longitude:** 13.8°E → 14.8°E  
-
-NOAA OISST provides NaN over land, so only ocean SST values are used.
 
 ---
 
-## 🌡️ Methodology (Hobday et al., 2016)
+## 🔧 Requirements
+
+Install dependencies using pip:
+
+```bash
+pip install numpy pandas xarray netCDF4 matplotlib tqdm requests tk
+```
+
+Or using Conda:
+
+```bash
+conda install -c conda-forge numpy pandas xarray netcdf4 matplotlib tqdm requests
+```
+
+---
+
+## 📍 Region of Interest (Gulf of Naples)
+
+```python
+LAT_MIN, LAT_MAX = 40.3, 41.1
+LON_MIN, LON_MAX = 13.8, 14.8
+```
+
+Modify these values to analyse any region worldwide.
+
+---
+
+## 📅 Climatology / Baseline Period
+
+```python
+BASELINE_START = "1984-01-01"
+BASELINE_END   = "2013-12-31"
+```
+
+---
+
+## 🌡 Marine Heatwave Definition (Hobday et al., 2016)
 
 A marine heatwave occurs when:
 
-1. SST exceeds the **90th percentile** of the daily climatology  
-2. For **≥ 5 consecutive days**  
-3. Climatology baseline used here: **2014–2019**  
-   (earliest available SST years)
+- SST exceeds the **90th percentile**
+- For **≥ 5 consecutive days**
+- Short interruptions (<2 days) are merged
 
-**Processing steps:**
-1. Load multi-year OISST netCDF files  
-2. Subset to the Gulf of Naples box  
-3. Compute daily climatology + 90th percentile threshold  
-4. Detect heatwave events  
-5. Generate yearly statistics  
-6. Save tables + time-series plot  
+Parameters:
+
+```python
+PERCENTILE = 0.9
+MIN_EVENT_LENGTH = 5
+```
 
 ---
 
-## 📂 Repository Structure
+## 🚀 How to Run the Script
 
-marine-heatwaves-gulf-of-naples/
-│
-├── notebooks/
-│ └── mhw_gulf_of_naples.ipynb
-│
-├── scripts/
-│ └── main.py
-│
-├── tables/
-│ ├── marine_heatwaves_events.csv
-│ └── marine_heatwaves_yearly_summary.csv
-│
-├── plots/
-│ └── sst_mhw_timeseries.png
-│
-├── data/
-│ └── README.md
-│
-├── requirements.txt
-└── README.md
+From terminal:
 
+```bash
+python mhw_detection_noaa_oisst.py
+```
+
+Workflow:
+
+1. Download required NOAA OISST files (1984–2024)  
+2. Merge datasets  
+3. Subset to the region of interest  
+4. Compute climatology and thresholds  
+5. Detect marine heatwaves  
+6. Export figures + tables  
 
 ---
 
-## 📊 Summary of Results (2014–2024)
+## 📊 Outputs
 
-Key findings for the Gulf of Naples:
+### 1️⃣ Figures (`outputs/figures/`)
+- SST time series  
+- Climatology  
+- Anomalies  
+- Marine heatwave periods  
 
-- **Strong rise in heatwave persistence**  
-  → from ~90 days in 2014 → **219 days in 2024**
+### 2️⃣ Tables (`outputs/tables/`)
+Event metadata CSV with:
 
-- **Higher intensity extremes**  
-  → anomalies > **2.2°C** after 2022
+| Start | End | Duration | Mean Intensity | Max Intensity | Cumulative Intensity |
 
-- **Longer events**  
-  → maximum duration grew from ~10–20 days to **45–63 days** post-2022
-
-- **Multi-season heatwaves**  
-  → events occur in winter, spring, summer, autumn
-
-The Gulf of Naples appears to have entered a **persistent marine heatwave regime**.
-
----
-
-## ▶️ Running the Analysis
-
-### 1. Install dependencies
-
-pip install -r requirements.txt
-
-### 2. Run the automated detector
-
-python scripts/main.py
-
-You will be asked to select a folder containing `.nc` files.
-
-### 3. Explore the results in the Jupyter Notebook
-
-jupyter notebook notebooks/mhw_gulf_of_naples.ipynb
-
+### 3️⃣ Processed NetCDF files (`data/processed/`)
+- Subset SST  
+- Climatology & threshold  
+- Dataset with MHW flags  
 
 ---
 
-## 📖 References
+## 📥 NOAA Data Source
 
-- Hobday et al. (2016), *A hierarchical approach to defining marine heatwaves*  
-- NOAA OISST v2.1 dataset  
-- Copernicus Mediterranean Ocean Monitoring reports  
+Daily SST files are downloaded from:
+
+```
+https://www.ncei.noaa.gov/data/sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/
+```
+
+Saved to:
+
+```
+data/raw/noaa_oisst/
+```
+
+Existing files are skipped automatically.
+
+---
+
+## ✏️ Customization
+
+You can modify:
+
+- Region coordinates  
+- Climatology baseline  
+- MHW threshold + minimum event duration  
+- Output directory structure  
+- Plotting options  
+
+---
+
+## 📚 References
+
+- Hobday et al. (2016). *A hierarchical approach to defining marine heatwaves.* Progress in Oceanography.  
+- NOAA OISST v2.1 User Guide  
+- Reynolds et al. (2007). *Daily high-resolution blended analyses for sea surface temperature.*
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome. Future additions may include:
+
+- Multi-region MHW comparison  
+- Trend detection (Theil–Sen, Mann–Kendall)  
+- Parallelised NOAA downloading  
+- Additional visualisation modules  
 
 ---
 
 ## 📜 License
-MIT License.
 
+MIT License — free to use, modify, and distribute.
