@@ -15,157 +15,166 @@ This project is intended for environmental data science, marine ecology, and lon
 
 ## 📁 Repository Structure
 
+```
 root/
 │
 ├── scripts/
-│ └── mhw_detection_noaa_oisst.py # Main Python script
+│   └── mhw_detection_noaa_oisst.py        # Main Python script
 │
 ├── data/
-│ ├── raw/ # NetCDF files auto-downloaded
-│ └── processed/ # Cleaned & subsetted datasets
+│   ├── raw/                               # NetCDF files auto-downloaded
+│   └── processed/                         # Cleaned & subsetted datasets
 │
 ├── outputs/
-│ ├── figures/ # Plots: SST, anomalies, MHWs
-│ └── tables/ # Event metadata, climatology
+│   ├── figures/                           # Plots: SST, anomalies, MHWs
+│   └── tables/                            # Event metadata, climatology
 │
 └── README.md
+```
 
 ---
 
 ## 🔧 Requirements
 
-Install all dependencies:
+Install dependencies using pip:
 
 ```bash
 pip install numpy pandas xarray netCDF4 matplotlib tqdm requests tk
 ```
-```Or via Conda:
 
+Or using Conda:
+
+```bash
 conda install -c conda-forge numpy pandas xarray netcdf4 matplotlib tqdm requests
 ```
-📍 Region of Interest (Gulf of Naples)
 
+---
+
+## 📍 Region of Interest (Gulf of Naples)
+
+```python
 LAT_MIN, LAT_MAX = 40.3, 41.1
 LON_MIN, LON_MAX = 13.8, 14.8
+```
 
+Modify these values to analyse any region worldwide.
 
-These values can be modified to process any region globally.
-📅 Climatology / Baseline Period
+---
 
-The baseline for threshold computation can be set here:
+## 📅 Climatology / Baseline Period
 
+```python
 BASELINE_START = "1984-01-01"
-BASELINE_END   = "2013-12-31"  # Default 30-year climatology
+BASELINE_END   = "2013-12-31"
+```
 
-🌡 Marine Heatwave Definition (Hobday et al., 2016)
+---
+
+## 🌡 Marine Heatwave Definition (Hobday et al., 2016)
 
 A marine heatwave occurs when:
 
-SST exceeds the 90th percentile for
-
-≥ 5 consecutive days
-
-Short gaps < 2 days are merged
+- SST exceeds the **90th percentile**
+- For **≥ 5 consecutive days**
+- Short interruptions (<2 days) are merged
 
 Parameters:
 
+```python
 PERCENTILE = 0.9
 MIN_EVENT_LENGTH = 5
+```
 
-🚀 How to Run the Script
+---
 
-From terminal / command prompt:
+## 🚀 How to Run the Script
 
+From terminal:
+
+```bash
 python mhw_detection_noaa_oisst.py
+```
 
+Workflow:
 
-Workflow steps:
+1. Download required NOAA OISST files (1984–2024)  
+2. Merge datasets  
+3. Subset to the region of interest  
+4. Compute climatology and thresholds  
+5. Detect marine heatwaves  
+6. Export figures + tables  
 
-Download all required NOAA OISST files (1984–2024)
+---
 
-Merge into a single dataset
+## 📊 Outputs
 
-Subset to the ROI
+### 1️⃣ Figures (`outputs/figures/`)
+- SST time series  
+- Climatology  
+- Anomalies  
+- Marine heatwave periods  
 
-Compute climatology and 90th percentile threshold
-
-Detect marine heatwaves
-
-Export plots & results
-
-📊 Outputs
-1️⃣ Figures (outputs/figures/)
-
-SST time series
-
-Seasonal climatology
-
-Temperature anomalies
-
-Highlighted MHW periods
-
-2️⃣ Tables (outputs/tables/)
-
-CSV containing:
+### 2️⃣ Tables (`outputs/tables/`)
+Event metadata CSV with:
 
 | Start | End | Duration | Mean Intensity | Max Intensity | Cumulative Intensity |
 
-3️⃣ Processed NetCDF files (data/processed/)
+### 3️⃣ Processed NetCDF files (`data/processed/`)
+- Subset SST  
+- Climatology & threshold  
+- Dataset with MHW flags  
 
-Subset SST
+---
 
-Climatology + threshold
-
-Dataset with MHW flags
-
-📥 NOAA Data Source
+## 📥 NOAA Data Source
 
 Daily SST files are downloaded from:
 
+```
 https://www.ncei.noaa.gov/data/sea-surface-temperature-optimum-interpolation/v2.1/access/avhrr/
+```
 
+Saved to:
 
-Downloaded files are stored in:
-
+```
 data/raw/noaa_oisst/
+```
 
+Existing files are skipped automatically.
 
-Files already present will be skipped automatically.
+---
 
-✏️ Customization
+## ✏️ Customization
 
-You can easily modify:
+You can modify:
 
-Region coordinates
+- Region coordinates  
+- Climatology baseline  
+- MHW threshold + minimum event duration  
+- Output directory structure  
+- Plotting options  
 
-Baseline climatology period
+---
 
-Marine heatwave parameters
+## 📚 References
 
-Output directories
+- Hobday et al. (2016). *A hierarchical approach to defining marine heatwaves.* Progress in Oceanography.  
+- NOAA OISST v2.1 User Guide  
+- Reynolds et al. (2007). *Daily high-resolution blended analyses for sea surface temperature.*
 
-Plotting settings
+---
 
-📚 References
+## 🤝 Contributing
 
-Hobday et al. (2016). A hierarchical approach to defining marine heatwaves. Progress in Oceanography.
+Contributions are welcome. Future additions may include:
 
-NOAA OISST v2.1 User Guide.
+- Multi-region MHW comparison  
+- Trend detection (Theil–Sen, Mann–Kendall)  
+- Parallelised NOAA downloading  
+- Additional visualisation modules  
 
-Reynolds et al. (2007). Daily high-resolution blended analyses for sea surface temperature.
+---
 
-🤝 Contributing
-
-Contributions are welcome. Ideas for improvements include:
-
-Parallel NOAA downloading
-
-Multi-region comparison
-
-Trend detection (Theil–Sen, Mann–Kendall)
-
-Additional visualizations
-
-📜 License
+## 📜 License
 
 MIT License — free to use, modify, and distribute.
