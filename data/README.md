@@ -4,7 +4,7 @@ This folder is intentionally empty.
 
 To run the full marine heatwave detector using raw SST data, download the **NOAA OISST v2.1 Daily SST (AVHRR-Only)** NetCDF files from:
 
-🔗 https://www.ncei.noaa.gov/products/optimum-interpolation-sst
+🔗 [https://www.ncei.noaa.gov/products/optimum-interpolation-sst](https://psl.noaa.gov/data/gridded/data.noaa.oisst.v2.highres.html)
 
 ---
 
