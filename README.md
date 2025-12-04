@@ -15,22 +15,26 @@ This project is intended for environmental data science, marine ecology, and lon
 
 ## 📁 Repository Structure
 
+## 📁 Repository Structure
+
 ```
-root/
+marine-heatwaves-gulf-of-naples/
 │
-├── scripts/
-│   └── main.py                            # Main Python script
+├── data/                     # Empty folder (raw SST will go here manually)
 │
-├── data/
-│   ├── raw/                               # NetCDF files auto-downloaded
-│   └── processed/                         # Cleaned & subsetted datasets
+├── notebooks/                # Jupyter notebooks for exploration & visualization
 │
-├── outputs/
-│   ├── figures/                           # Plots: SST, anomalies, MHWs
-│   └── tables/                            # Event metadata, climatology
+├── plots/                    # Auto-generated figures (MHW plots, SST trends, etc.)
 │
-└── README.md
+├── scripts/                  # Python scripts (main analysis workflow)
+│
+├── tables/                   # Output CSV event tables (auto-generated)
+│
+├── .gitignore                # Ignore rules for notebooks, data, cache, etc.
+├── README.md                 # Project documentation
+└── requirements.txt          # Python dependencies
 ```
+
 
 ---
 
