@@ -19,7 +19,7 @@ This project is intended for environmental data science, marine ecology, and lon
 root/
 │
 ├── scripts/
-│   └── mhw_detection_noaa_oisst.py        # Main Python script
+│   └── main.py                            # Main Python script
 │
 ├── data/
 │   ├── raw/                               # NetCDF files auto-downloaded
