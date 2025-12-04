@@ -15,8 +15,6 @@ This project is intended for environmental data science, marine ecology, and lon
 
 ## 📁 Repository Structure
 
-## 📁 Repository Structure
-
 ```
 marine-heatwaves-gulf-of-naples/
 │
