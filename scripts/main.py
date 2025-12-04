@@ -1,3 +1,32 @@
+"""
+Marine heatwave detection workflow for the Gulf of Naples
+using NOAA OISST v2 high-resolution daily SST (1984–2024).
+
+Main steps
+----------
+1. Download yearly global OISST NetCDF files from NOAA/PSL
+   into `data/raw/` (only missing years are fetched).
+2. Build an area-averaged SST time series for the Gulf of Naples.
+3. Compute seasonal climatology and percentile-based threshold
+   over a user-defined baseline period.
+4. Detect marine heatwave (MHW) events following Hobday et al. (2016).
+5. Summarise events by year and save tables to `tables/`.
+6. Generate diagnostic plots:
+   - full SST time series with MHW shading
+   - trend and change-point analysis for SST and MHW metrics.
+
+Assumptions & conventions
+-------------------------
+- Input data: NOAA OISST v2 high-resolution daily fields from PSL.
+- Units: Kelvin or °C (auto-converted to °C if mean > 100).
+- Calendar: Gregorian; time axis handled via xarray/pandas.
+- Region: Gulf of Naples (configurable via LAT/LON bounds).
+- Longitudes: automatic handling of 0–360 vs −180–180 grids.
+
+Outputs are designed to be reproducible and easily reusable
+for further analysis or publication-quality figures.
+"""
+
 import os
 import glob
 import math
@@ -9,57 +38,46 @@ import pandas as pd
 import xarray as xr
 import matplotlib.pyplot as plt
 
-import tkinter as tk
-from tkinter import filedialog
+# ================== USER CONFIGURATION ==================
 
-# ================== CONFIGURATION ==================
-
-# Region of interest (Gulf of Naples, can be changed)
+# Region of interest (ROI) for the Gulf of Naples.
+# Lat/Lon bounds are in degrees, using a regular lat/lon grid.
 LAT_MIN, LAT_MAX = 40.3, 41.1
 LON_MIN, LON_MAX = 13.8, 14.8
 
-# Baseline period for climatology / threshold
-# Set these to match your new choice, e.g. full record:
-# BASELINE_START = "1984-01-01"
-# BASELINE_END   = "2024-12-31"
+# Baseline period used to compute:
+#   - daily climatological mean SST
+#   - percentile-based threshold for MHW definition
+# This can be any sub-period within the full record.
 BASELINE_START = "1984-01-01"
-BASELINE_END   = "2013-12-31"  # example 30-year baseline
+BASELINE_END   = "2013-12-31"  # example 30-year baseline (WMO-style)
 
-# Marine heatwave definition
-PERCENTILE = 0.9        # 90th percentile
-MIN_EVENT_LENGTH = 5    # minimum event duration (days)
+# Marine heatwave definition following Hobday et al. (2016):
+#   - SST above the percentile threshold
+#   - for at least MIN_EVENT_LENGTH consecutive days.
+PERCENTILE = 0.9        # 90th percentile threshold
+MIN_EVENT_LENGTH = 5    # minimum event duration [days]
 
-# Time coverage (years) to use
+# Temporal coverage for the analysis (inclusive years).
+# These years will be checked/downloaded from PSL.
 START_YEAR = 1984
-END_YEAR   = 2024   # inclusive
+END_YEAR   = 2024
 
-# PSL base URL for direct file download (global yearly fields)
+# NOAA PSL base URL for global yearly OISST fields.
+# Each file contains one year of daily SST on a regular grid.
 PSL_BASE_URL = "https://downloads.psl.noaa.gov/Datasets/noaa.oisst.v2.highres"
 
-# Output (relative to where you run the script)
-PLOTS_DIR  = "plots"
-TABLES_DIR = "tables"
+# Directory where raw OISST NetCDF files are stored.
+# This is relative to the working directory where you run the script
+# (typically the repository root).
+RAW_DATA_DIR = os.path.join("data", "raw")
+
+# Output directories for derived products.
+PLOTS_DIR  = "plots"    # figures: time series, trends, etc.
+TABLES_DIR = "tables"   # CSV tables: events, yearly summaries, tests
 os.makedirs(PLOTS_DIR, exist_ok=True)
 os.makedirs(TABLES_DIR, exist_ok=True)
-
-# ====================================================
-# 0) TKINTER FOLDER SELECTION
-# ====================================================
-
-def select_data_folder(prompt: str) -> str:
-    """
-    Use a Tkinter dialog to let the user choose a folder.
-    This is where the yearly OISST .nc files will live.
-    """
-    root = tk.Tk()
-    root.withdraw()  # hide the main window
-
-    folder = filedialog.askdirectory(title=prompt)
-    if not folder:
-        raise ValueError("No folder selected. Aborting.")
-
-    return folder
-
+os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
 # ====================================================
 # 1) DOWNLOAD YEARLY FILES (ONE AT A TIME, SKIP EXISTING)
@@ -67,10 +85,26 @@ def select_data_folder(prompt: str) -> str:
 
 def download_year_from_psl(year: int, raw_dir: str, overwrite: bool = False) -> str:
     """
-    Download one yearly OISST V2 high-res daily mean file from PSL
-    and save it under raw_dir. Returns the local file path.
+    Download a single yearly OISST v2 high-resolution daily mean file
+    from the NOAA PSL server into `raw_dir`.
 
-    Example remote file:
+    Parameters
+    ----------
+    year : int
+        Year to download (e.g. 1984).
+    raw_dir : str
+        Local directory where the resulting NetCDF file will be stored.
+    overwrite : bool, optional
+        If True, re-download even if the file already exists.
+
+    Returns
+    -------
+    str
+        Local path to the downloaded (or existing) NetCDF file.
+
+    Notes
+    -----
+    Example URL:
     https://downloads.psl.noaa.gov/Datasets/noaa.oisst.v2.highres/sst.day.mean.1984.nc
     """
     os.makedirs(raw_dir, exist_ok=True)
@@ -79,7 +113,7 @@ def download_year_from_psl(year: int, raw_dir: str, overwrite: bool = False) -> 
     url = f"{PSL_BASE_URL}/{fname}"
     out_path = os.path.join(raw_dir, fname)
 
-    # Skip if already present and overwrite=False
+    # Skip file if it already exists and overwrite is False
     if os.path.exists(out_path) and not overwrite:
         print(f"✓ {year} already exists → skipping download")
         return out_path
@@ -87,11 +121,11 @@ def download_year_from_psl(year: int, raw_dir: str, overwrite: bool = False) -> 
     print(f"↓ Downloading {year} from PSL:")
     print(f"  {url}")
 
-    # Stream download with progress bar
+    # Stream download with a progress bar for large files
     with requests.get(url, stream=True, timeout=600) as r:
         r.raise_for_status()
         total = int(r.headers.get("Content-Length", 0))
-        chunk_size = 1024 * 1024  # 1 MB
+        chunk_size = 1024 * 1024  # 1 MB chunks
 
         with open(out_path, "wb") as f, tqdm(
             total=total,
@@ -111,24 +145,36 @@ def download_year_from_psl(year: int, raw_dir: str, overwrite: bool = False) -> 
 
 def ensure_all_years_downloaded(start_year: int, end_year: int, raw_dir: str):
     """
-    Check raw_dir for existing yearly OISST files.
-    Only download the years that are missing.
+    Check which yearly OISST files are already present in `raw_dir`
+    and download only the missing years.
+
+    Parameters
+    ----------
+    start_year, end_year : int
+        Inclusive range of years to ensure (e.g. 1984–2024).
+    raw_dir : str
+        Directory where NetCDF files are stored.
+
+    Side effects
+    ------------
+    - Prints a summary of existing vs missing years.
+    - Downloads missing yearly files.
     """
     os.makedirs(raw_dir, exist_ok=True)
 
     expected_years = set(range(start_year, end_year + 1))
     existing_years = set()
 
-    # Scan folder for files of the form sst.day.mean.YYYY.nc
+    # Look for files named like: sst.day.mean.YYYY.nc
     for fname in os.listdir(raw_dir):
         if fname.startswith("sst.day.mean.") and fname.endswith(".nc"):
             parts = fname.split(".")
-            # expected pattern: sst day mean YYYY nc
             if len(parts) >= 4:
                 try:
                     y = int(parts[3])
                     existing_years.add(y)
                 except ValueError:
+                    # Ignore unexpected file name patterns
                     pass
 
     missing_years = sorted(expected_years - existing_years)
@@ -141,7 +187,7 @@ def ensure_all_years_downloaded(start_year: int, end_year: int, raw_dir: str):
     print(f"Missing files:   {missing_years if missing_years else 'none'}")
     print("==========================================\n")
 
-    # Download only the missing ones
+    # Download only the years that are missing
     for y in missing_years:
         download_year_from_psl(y, raw_dir=raw_dir, overwrite=False)
 
@@ -150,7 +196,7 @@ def ensure_all_years_downloaded(start_year: int, end_year: int, raw_dir: str):
 
 
 # ====================================================
-# 2) LOAD LOCAL FILES AND BUILD GULF-OF-NAPLES TS
+# 2) LOAD LOCAL FILES AND BUILD GULF-OF-NAPLES TIME SERIES
 # ====================================================
 
 def load_sst_timeseries_for_region(
@@ -159,10 +205,29 @@ def load_sst_timeseries_for_region(
     lon_min: float, lon_max: float,
 ) -> xr.DataArray:
     """
-    Load multiple locally stored SST netCDF files and directly extract
-    the area-averaged time series for a given region.
+    Build an area-averaged SST time series for a given lat/lon box
+    from multiple yearly NetCDF files stored locally.
 
-    NOTE: yearly files are global OISST; we subset to AOI locally.
+    Parameters
+    ----------
+    raw_dir : str
+        Directory containing OISST NetCDF files (sst.day.mean.YYYY.nc).
+    lat_min, lat_max : float
+        Latitude bounds of the region of interest [deg].
+    lon_min, lon_max : float
+        Longitude bounds of the region of interest [deg].
+
+    Returns
+    -------
+    xarray.DataArray
+        1D SST time series (time dimension), in °C, spatially averaged
+        over the region.
+
+    Notes
+    -----
+    - Automatically detects whether the dataset uses 0–360 or −180–180
+      longitude convention and adjusts the ROI bounds accordingly.
+    - If input SST is in Kelvin (mean > 100), values are converted to °C.
     """
     pattern = os.path.join(raw_dir, "sst.day.mean.*.nc")
     file_list = sorted(glob.glob(pattern))
@@ -173,21 +238,20 @@ def load_sst_timeseries_for_region(
     for f in file_list:
         print("  ", f)
 
-    # Open first file to detect SST variable and longitude convention
+    # Open first file to inspect SST variable name and longitude convention
     first_ds = xr.open_dataset(file_list[0])
 
-    # Detect SST variable name
+    # Detect SST variable name commonly used in gridded products
     for cand in ["sst", "SST", "sea_surface_temperature", "analysed_sst"]:
         if cand in first_ds.data_vars:
             sst_var = cand
             break
     else:
         raise ValueError("Could not find SST variable in first dataset. "
-                         "Check your netCDF files.")
+                         "Check your NetCDF files for variable naming.")
 
-    # Handle longitude convention using first file
+    # Adjust longitude bounds if dataset uses 0–360 convention
     if float(first_ds.lon.max()) > 180:
-        # 0–360 convention -> shift our lon range
         lon_min_mod = (lon_min + 360) % 360
         lon_max_mod = (lon_max + 360) % 360
     else:
@@ -195,35 +259,35 @@ def load_sst_timeseries_for_region(
 
     ts_list = []
 
-    # Loop over all files, keep only the region + mean
+    # Loop over yearly files, extract regional mean time series
     for f in file_list:
         print(f"  Processing {os.path.basename(f)}...")
         ds = xr.open_dataset(f)
         sst = ds[sst_var]
 
-        # Subset the region
+        # Subset the region of interest
         sst_sub = sst.sel(
             lat=slice(lat_min, lat_max),
             lon=slice(lon_min_mod, lon_max_mod)
         )
 
-        # Area-averaged SST for this file
+        # Spatial mean over the selected box
         ts = sst_sub.mean(dim=("lat", "lon"))
 
-        # Load values into memory, then close this file
+        # Load values into memory, then close file to free resources
         ts = ts.load()
         ds.close()
 
         ts_list.append(ts)
 
-    # Concatenate all time segments into one long time series
+    # Concatenate yearly time fragments into a continuous series
     sst_ts = xr.concat(ts_list, dim="time")
 
-    # Kelvin -> Celsius if needed
+    # Convert Kelvin → Celsius if needed (robust check on mean value)
     if float(sst_ts.mean()) > 100:
         sst_ts = sst_ts - 273.15
 
-    # Ensure time is sorted
+    # Ensure time axis is strictly increasing
     sst_ts = sst_ts.sortby("time")
 
     print(
@@ -236,7 +300,7 @@ def load_sst_timeseries_for_region(
 
 
 # ====================================================
-# 3) MHW COMPUTATION
+# 3) MARINE HEATWAVE COMPUTATION
 # ====================================================
 
 def compute_climatology_and_threshold(
@@ -246,8 +310,29 @@ def compute_climatology_and_threshold(
     percentile: float = 0.9
 ):
     """
-    Compute daily climatological mean and percentile threshold
-    based on a chosen baseline period.
+    Compute daily climatological mean SST and the percentile-based
+    MHW threshold over a baseline period.
+
+    Parameters
+    ----------
+    sst_ts : xarray.DataArray
+        Full SST time series (°C).
+    baseline_start, baseline_end : str
+        ISO dates defining the baseline period (e.g. "1984-01-01").
+    percentile : float, optional
+        Percentile for the MHW threshold (e.g. 0.9 for 90th).
+
+    Returns
+    -------
+    clim_full : xarray.DataArray
+        Climatological mean SST for each day of the full record.
+    thresh_full : xarray.DataArray
+        Percentile threshold time series aligned with `sst_ts`.
+
+    Notes
+    -----
+    - Uses day-of-year (DOY) grouping, ignoring leap-day issues.
+    - If the baseline is very short (< ~10 years), a warning is printed.
     """
     sst_base = sst_ts.sel(time=slice(baseline_start, baseline_end))
 
@@ -257,12 +342,14 @@ def compute_climatology_and_threshold(
 
     doy = sst_base["time"].dt.dayofyear
 
+    # DOY climatology and threshold from baseline
     clim_mean = sst_base.groupby(doy).mean("time")
     clim_thresh = sst_base.groupby(doy).quantile(percentile, dim="time")
 
     clim_mean = clim_mean.rename({"dayofyear": "doy"})
     clim_thresh = clim_thresh.rename({"dayofyear": "doy"})
 
+    # Map DOY climatology/threshold back to full time axis
     full_doy = sst_ts["time"].dt.dayofyear
     clim_full = clim_mean.sel(doy=full_doy)
     thresh_full = clim_thresh.sel(doy=full_doy)
@@ -276,7 +363,32 @@ def detect_marine_heatwaves(
     min_length: int = 5
 ) -> pd.DataFrame:
     """
-    Detect marine heatwaves: SST > threshold for at least min_length days.
+    Detect marine heatwave (MHW) events based on a threshold time series.
+
+    Parameters
+    ----------
+    sst_ts : xarray.DataArray
+        SST time series (°C).
+    threshold_ts : xarray.DataArray
+        Threshold time series (same shape as sst_ts).
+    min_length : int, optional
+        Minimum number of consecutive days above threshold
+        to qualify as an event.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per event, with columns:
+        - start (datetime64)
+        - end (datetime64)
+        - duration_days
+        - max_intensity_degC
+        - mean_intensity_degC
+
+    Notes
+    -----
+    - Intensity is defined as SST − threshold.
+    - Short gaps and merging rules can be extended if needed.
     """
     sst_vals = sst_ts.values
     thr_vals = threshold_ts.values
@@ -290,13 +402,16 @@ def detect_marine_heatwaves(
 
     for i, is_above in enumerate(above):
         if is_above and not in_event:
+            # Start a new potential MHW
             in_event = True
             start_idx = i
         elif not is_above and in_event:
+            # End of an event candidate
             end_idx = i - 1
             duration = end_idx - start_idx + 1
 
             if duration >= min_length:
+                # Extract event-specific SST and threshold
                 event_sst = sst_vals[start_idx:end_idx+1]
                 event_thr = thr_vals[start_idx:end_idx+1]
                 intensity = event_sst - event_thr
@@ -311,10 +426,11 @@ def detect_marine_heatwaves(
                     "mean_intensity_degC": mean_intensity
                 })
 
+            # Reset event flag
             in_event = False
             start_idx = None
 
-    # If the series ends during an event
+    # Handle the case where the series ends while still in an event
     if in_event:
         end_idx = len(above) - 1
         duration = end_idx - start_idx + 1
@@ -337,7 +453,22 @@ def detect_marine_heatwaves(
 
 def summarize_events_by_year(events_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Aggregate MHW events by year (using event start date).
+    Aggregate MHW events by calendar year (based on event start date).
+
+    Parameters
+    ----------
+    events_df : pandas.DataFrame
+        Event-level table returned by `detect_marine_heatwaves`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per year, including:
+        - n_events
+        - total_mhw_days
+        - max_intensity_degC
+        - mean_intensity_degC
+        - longest_event_days
     """
     if events_df.empty:
         return pd.DataFrame()
@@ -365,7 +496,23 @@ def plot_time_series_with_events(
     region_name: str = "Selected Region"
 ):
     """
-    Plot full SST time series, climatology, threshold + shade MHW events.
+    Plot full SST time series with climatology, threshold,
+    and shaded marine heatwave events.
+
+    Parameters
+    ----------
+    sst_ts : xarray.DataArray
+        SST time series (°C).
+    clim_ts : xarray.DataArray
+        Climatological mean SST aligned with sst_ts.
+    thresh_ts : xarray.DataArray
+        Percentile threshold aligned with sst_ts.
+    events_df : pandas.DataFrame
+        Event-level table from `detect_marine_heatwaves`.
+    out_path : str
+        Path where the PNG figure will be saved.
+    region_name : str, optional
+        Label used in the plot title.
     """
     fig, ax = plt.subplots(figsize=(14, 6))
 
@@ -373,12 +520,22 @@ def plot_time_series_with_events(
 
     ax.plot(time_vals, sst_ts, label="SST (°C)", linewidth=1)
     ax.plot(time_vals, clim_ts, label="Climatology (baseline mean)", linestyle="--")
-    ax.plot(time_vals, thresh_ts, label=f"{int(PERCENTILE * 100)}th percentile threshold", linestyle=":")
+    ax.plot(
+        time_vals,
+        thresh_ts,
+        label=f"{int(PERCENTILE * 100)}th percentile threshold",
+        linestyle=":"
+    )
 
+    # Shade each detected MHW event
     for i, ev in events_df.iterrows():
-        ax.axvspan(ev["start"], ev["end"], alpha=0.2,
-                   color="tab:blue",
-                   label="MHW event" if i == 0 else None)
+        ax.axvspan(
+            ev["start"],
+            ev["end"],
+            alpha=0.2,
+            color="tab:blue",
+            label="MHW event" if i == 0 else None
+        )
 
     ax.set_title(f"Marine Heatwaves – {region_name}")
     ax.set_xlabel("Time")
@@ -393,18 +550,27 @@ def plot_time_series_with_events(
 
 
 # ====================================================
-# 4) SIGNIFICANCE TESTS (1–2–3) + PLOTS
+# 4) SIGNIFICANCE TESTS (TRENDS + CHANGE-POINTS) & PLOTS
 # ====================================================
 
 def _normal_cdf(x: float) -> float:
-    """Standard normal CDF using math.erf."""
+    """Standard normal CDF using math.erf (helper for p-values)."""
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
 def mann_kendall_test(series: pd.Series) -> dict:
     """
-    Non-parametric Mann–Kendall trend test + Kendall's tau.
-    Returns dict with tau, S, varS, Z, p.
+    Mann–Kendall non-parametric trend test and Kendall's tau.
+
+    Parameters
+    ----------
+    series : pandas.Series
+        Time series indexed by time (e.g. years).
+
+    Returns
+    -------
+    dict
+        Keys: n, mk_tau, mk_S, mk_varS, mk_Z, mk_p.
     """
     s = series.dropna()
     n = len(s)
@@ -420,7 +586,7 @@ def mann_kendall_test(series: pd.Series) -> dict:
 
     y = s.values
 
-    # S statistic
+    # S statistic (pairwise sign comparison)
     S = 0
     for i in range(n - 1):
         for j in range(i + 1, n):
@@ -429,14 +595,14 @@ def mann_kendall_test(series: pd.Series) -> dict:
             elif y[j] < y[i]:
                 S -= 1
 
-    # Tie correction
+    # Tie correction for variance
     unique, counts = np.unique(y, return_counts=True)
     tie_term = 0
     for c in counts:
         if c > 1:
-            tie_term += c * (c - 1) * (2*c + 5)
+            tie_term += c * (c - 1) * (2 * c + 5)
 
-    varS = (n * (n - 1) * (2*n + 5) - tie_term) / 18.0
+    varS = (n * (n - 1) * (2 * n + 5) - tie_term) / 18.0
 
     if S > 0:
         Z = (S - 1) / math.sqrt(varS)
@@ -460,10 +626,20 @@ def mann_kendall_test(series: pd.Series) -> dict:
 
 def sen_slope(series: pd.Series, x_years: pd.Series) -> float:
     """
-    Sen's slope (median of all pairwise slopes).
-    Slope is in units of 'per year' if x_years is in years.
+    Sen's slope estimator (median of all pairwise slopes).
 
-    x_years must be a Series indexed the same way as series.
+    Parameters
+    ----------
+    series : pandas.Series
+        Time series (e.g. yearly metric).
+    x_years : pandas.Series
+        Time coordinate expressed as numeric years, indexed
+        consistently with `series`.
+
+    Returns
+    -------
+    float
+        Slope per unit of x_years (usually per year).
     """
     s = series.dropna()
     x = x_years.loc[s.index].values
@@ -486,8 +662,19 @@ def sen_slope(series: pd.Series, x_years: pd.Series) -> float:
 
 def linear_trend(series: pd.Series, x_years: pd.Series) -> dict:
     """
-    Simple OLS linear trend y = a + b * x.
-    Returns slope per year, intercept, R^2, p (approx normal).
+    Ordinary Least Squares (OLS) linear trend: y = a + b * x.
+
+    Parameters
+    ----------
+    series : pandas.Series
+        Time series values.
+    x_years : pandas.Series
+        Numeric time axis (e.g. years), with same index as `series`.
+
+    Returns
+    -------
+    dict
+        Keys: lin_slope, lin_intercept, lin_R2, lin_p.
     """
     s = series.dropna()
     x = x_years.loc[s.index].values.astype(float)
@@ -531,7 +718,7 @@ def linear_trend(series: pd.Series, x_years: pd.Series) -> dict:
             p = float("nan")
         else:
             t_stat = b / se_b
-            # Approximate using normal distribution
+            # Use normal approximation for p-value
             p = 2.0 * (1.0 - _normal_cdf(abs(t_stat)))
 
     return {
@@ -544,11 +731,17 @@ def linear_trend(series: pd.Series, x_years: pd.Series) -> dict:
 
 def pettitt_test(series: pd.Series) -> dict:
     """
-    Pettitt change-point test.
-    Returns change_index (int, position in sorted series),
-    change_value (x coordinate), and p-value.
+    Pettitt non-parametric change-point test.
 
-    We assume x-axis is sorted (e.g., years).
+    Parameters
+    ----------
+    series : pandas.Series
+        Time series (e.g. yearly metric) sorted by time.
+
+    Returns
+    -------
+    dict
+        Keys: pettitt_index, pettitt_x, pettitt_p.
     """
     s = series.dropna()
     n = len(s)
@@ -575,10 +768,10 @@ def pettitt_test(series: pd.Series) -> dict:
     K_max = max(absK)
     t_index = absK.index(K_max)
 
-    # Approximate p-value
+    # Approximate p-value for Pettitt statistic
     p = 2.0 * math.exp((-6.0 * (K_max ** 2)) / (n**3 + n**2))
 
-    # Get corresponding x-coordinate (e.g. year)
+    # Get corresponding time coordinate (e.g. year)
     x_vals = s.index.values
     x_change = x_vals[t_index]
 
@@ -599,24 +792,43 @@ def plot_trend_series(years: np.ndarray,
                       mk_p: float,
                       pettitt_x):
     """
-    Generic plot for a yearly series with:
-    - scatter + line
-    - linear trend line
-    - vertical Pettitt change-point (if any)
-    - text with slope and p-values
+    Generic utility to plot a yearly metric with:
+    - raw values,
+    - linear trend line,
+    - Pettitt change-point (if detected),
+    - annotation of slope and p-values.
+
+    Parameters
+    ----------
+    years : array-like
+        Year values (x-axis).
+    values : array-like
+        Metric values (y-axis).
+    metric_label : str
+        Label for axis and legend.
+    out_name : str
+        File name of the output PNG (relative to PLOTS_DIR).
+    lin_slope, lin_intercept : float
+        Parameters of the linear fit.
+    lin_p : float
+        p-value of the linear trend.
+    mk_p : float
+        p-value of Mann–Kendall test.
+    pettitt_x :
+        Location of Pettitt change-point (e.g. year) or None.
     """
     fig, ax = plt.subplots(figsize=(10, 5))
 
     # Time series
     ax.plot(years, values, "-o", label=metric_label)
 
-    # Trend line
+    # Linear trend line (if valid)
     if not math.isnan(lin_slope) and not math.isnan(lin_intercept):
         x_line = np.array([years.min(), years.max()])
         y_line = lin_intercept + lin_slope * x_line
         ax.plot(x_line, y_line, "--", label="Linear trend")
 
-    # Pettitt change-point
+    # Pettitt change-point as vertical line
     if pettitt_x is not None:
         try:
             cx = int(pettitt_x)
@@ -628,12 +840,21 @@ def plot_trend_series(years: np.ndarray,
     ax.set_ylabel(metric_label)
     ax.set_title(f"{metric_label} – Trend & Change-point")
 
-    # Annotation text
-    txt = f"slope = {lin_slope:.4g} /yr\n" \
-          f"lin p = {lin_p:.3g}\n" \
-          f"MK p = {mk_p:.3g}"
-    ax.text(0.01, 0.99, txt, transform=ax.transAxes,
-            va="top", ha="left", bbox=dict(boxstyle="round", fc="white", alpha=0.7))
+    # Text box with key statistics
+    txt = (
+        f"slope = {lin_slope:.4g} /yr\n"
+        f"lin p = {lin_p:.3g}\n"
+        f"MK p = {mk_p:.3g}"
+    )
+    ax.text(
+        0.01,
+        0.99,
+        txt,
+        transform=ax.transAxes,
+        va="top",
+        ha="left",
+        bbox=dict(boxstyle="round", fc="white", alpha=0.7),
+    )
 
     ax.grid(True, alpha=0.3)
     ax.legend()
@@ -648,17 +869,24 @@ def plot_trend_series(years: np.ndarray,
 def run_significance_tests(sst_ts: xr.DataArray,
                            summary_df: pd.DataFrame):
     """
-    1) Trend tests on annual mean/min/max SST (with plots).
-    2) Trend tests on yearly MHW metrics (summary_df, with plots).
-    3) Pettitt change-point tests on each of those series.
+    Perform trend and change-point analysis on:
+    1) Annual SST metrics (mean, max, min).
+    2) Yearly marine heatwave metrics from `summary_df`.
 
-    Saves:
+    For each metric, the following are computed:
+    - Mann–Kendall test (non-parametric trend).
+    - Sen's slope (robust trend estimate).
+    - OLS linear trend (slope, R², p-value).
+    - Pettitt change-point test.
+
+    Results
+    -------
     - tables/trend_significance_sst.csv
     - tables/trend_significance_mhw_metrics.csv
     - plots/trend_*.png
     """
     # ---- 1. Annual SST metrics ----
-    # Use "YE" (year-end) instead of deprecated "A"
+    # Use "YE" (year-end) resampling to avoid deprecation warnings.
     sst_annual_mean = sst_ts.resample(time="YE").mean()
     sst_annual_max  = sst_ts.resample(time="YE").max()
     sst_annual_min  = sst_ts.resample(time="YE").min()
@@ -702,7 +930,7 @@ def run_significance_tests(sst_ts: xr.DataArray,
 
         results_sst.append(row)
 
-        # --- Plot for this SST metric ---
+        # Plot for this SST metric
         plot_trend_series(
             years=series.index.values.astype(int),
             values=series.values,
@@ -729,9 +957,9 @@ def run_significance_tests(sst_ts: xr.DataArray,
 
     results_mhw = []
     for metric_name in mhw_metrics:
-        # series indexed by year, e.g. 1985, 1986, ...
+        # Series indexed by year (e.g. 1985, 1986, ...)
         series = summary_df.set_index("year")[metric_name]
-        years_idx = series.index.to_series()  # IMPORTANT: same index as series
+        years_idx = series.index.to_series()
 
         mk_res = mann_kendall_test(series)
         sen = sen_slope(series, years_idx)
@@ -755,7 +983,7 @@ def run_significance_tests(sst_ts: xr.DataArray,
 
         results_mhw.append(row)
 
-        # --- Plot for this MHW metric ---
+        # Plot for this MHW metric
         plot_trend_series(
             years=series.index.values.astype(int),
             values=series.values,
@@ -775,15 +1003,24 @@ def run_significance_tests(sst_ts: xr.DataArray,
 
 
 # ====================================================
-# 5) MAIN
+# 5) MAIN WORKFLOW
 # ====================================================
 
 def main():
-    # 0) Ask user where the yearly OISST .nc files are / should be stored
-    print("Please select the folder where OISST yearly NetCDF files are stored (or will be downloaded):")
-    raw_dir = select_data_folder("Select / create folder for OISST yearly .nc files")
+    """
+    Orchestrate the full marine heatwave analysis:
+      - ensure raw data is present (download if needed),
+      - build regional SST time series,
+      - derive climatology and threshold,
+      - detect and summarise MHW events,
+      - produce plots and significance tests.
+    """
+    # Use fixed data/raw folder inside the repository
+    raw_dir = RAW_DATA_DIR
+    os.makedirs(raw_dir, exist_ok=True)
+    print(f"Using raw data folder: {os.path.abspath(raw_dir)}")
 
-    # 1) Ensure all global yearly files are present locally (skip those already there)
+    # 1) Ensure all requested years are available locally
     ensure_all_years_downloaded(START_YEAR, END_YEAR, raw_dir)
 
     # 2) Build Gulf-of-Naples SST time series from local files
@@ -833,7 +1070,7 @@ def main():
         region_name="Gulf of Naples"
     )
 
-    # 7) Significance tests (1–2–3) + trend plots
+    # 7) Trend and change-point analysis
     print("Running trend & change-point significance tests (with plots)...")
     run_significance_tests(sst_ts, summary_df)
 
